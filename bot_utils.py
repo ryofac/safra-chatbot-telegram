@@ -1,17 +1,17 @@
 import asyncio
-import io
+import datetime
 import json
 import logging
 import time
 
 import google.generativeai as generai
 from google.api_core.exceptions import ResourceExhausted
-from PIL import Image
 from telegram.constants import ParseMode
 from telegram.ext import ConversationHandler
 
 import config
 from config import MODEL_NAME, MODEL_PROMPT
+from sensor_source import SensorData, SensorSource
 
 # Enum de estados
 CHAT, REQUEST_IMAGE, PROCESSING_IMAGE = range(3)
@@ -22,6 +22,15 @@ logger = logging.getLogger(__name__)
 model = generai.GenerativeModel(config.MODEL_NAME)
 
 chat_sessions = {}
+
+data_source = SensorSource("./external/cred.json")
+
+
+def format_external_data(sensor_data: SensorData):
+    logging.info(f"DADO DE SENSOR: + {sensor_data}")
+    json_sensor_source = sensor_data.__dict__
+    json_sensor_source["data_coleta"] = sensor_data.data_coleta.timestamp()
+    return json_sensor_source
 
 
 def get_user_message_count(history):
@@ -34,7 +43,7 @@ def get_user_message_count(history):
 
 async def start(update, context):
     await update.message.reply_text(
-        "Bem vindo ao Gobot! \n <b>Sua I.A especializada em Godot Game Engine!</b>\n Para sair digite /end",
+        "Bem vindo ao FlufinhoBot! \n <b>O seu amigo de irrigação!</b>\n Para sair dessa conversa digite: /end",
         parse_mode=ParseMode.HTML,
     )
     return CHAT
@@ -54,23 +63,22 @@ async def send_message_with_retry(chat_session, prompt, retries=3):
             logger.warning(f"Tentativa {attempt + 1} de enviar mensagem excedeu o tempo limite. Reintentando...")
         except Exception as e:
             logger.error(f"Erro ao enviar mensagem na tentativa {attempt + 1}: {e}", exc_info=True)
-        except ResourceExhausted as e:
-            raise ResourceExhausted(e)
+        except ResourceExhausted as err:
+            await chat_session.message.reply_text(
+                f"Limite de quota alcançado : {err}",
+            )
 
     raise RuntimeError("Falha ao enviar mensagem após várias tentativas.")
-
-
-def load_data():
-    with open(config.FILE_PATH) as file:
-        conteudo = json.load(file)
-        return "Você sabe SOMENTE dados sobre esses jogos, em JSON: " + json.dumps(conteudo)
 
 
 def get_or_create_chat_session(user_id):
     chat_session = chat_sessions.get(user_id)
     if chat_session is None:
         chat_session = model.start_chat(
-            history=[{"role": "model", "parts": MODEL_PROMPT}, {"role": "model", "parts": load_data()}]
+            history=[
+                {"role": "model", "parts": MODEL_PROMPT},
+                {"role": "model", "parts": "Você vai receber dados de sensores a cada mensagem do usuário"},
+            ]
         )
         chat_sessions[user_id] = chat_session
     return chat_session
@@ -80,16 +88,6 @@ async def chat(update, context):
     user_id = update.message.from_user.id
     chat_session = get_or_create_chat_session(user_id)
     try:
-        if len(update.message.photo) > 0:
-            await update.message.reply_text(
-                (
-                    "<b>Notei que você enviou uma imagem</b>\n"
-                    "Digite /image para entrar no modo de processamento de imagens"
-                ),
-                parse_mode=ParseMode.HTML,
-            )
-            return CHAT
-
         user_message = update.message.text.strip() if update.message.text else None
 
         if not user_message:
@@ -104,13 +102,26 @@ async def chat(update, context):
             parse_mode=ParseMode.HTML,
         )
         start_time = time.time()
-        prompt = f"\n Perfira respostas curtas, Aqui está a mensagem do usuário: {user_message}"
+
+        start_date = datetime.datetime.now()
+        end_date = start_date - datetime.timedelta(days=5000)
+
+        raw_data = data_source.get_data((end_date, start_date))
+
+        all_data = json.dumps([format_external_data(data) for data in raw_data])
+
+        logging.info(all_data)
+
+        prompt = f"""\n Perfira respostas curtas, dados atuais dos sensores em json:\n
+        {all_data}\n
+        Aqui está a mensagem do usuário: {user_message}"""
+
         response = await send_message_with_retry(chat_session, prompt)
         elapsed_time = time.time() - start_time
 
-        logger.info(f"Mensagem enviada: {user_message}")
-        logger.info(f"Mensagem recebida: {response.text}")
-        logger.info(f"Tempo de resposta do modelo: {elapsed_time:.2f} segundos")
+        # logger.info(f"Mensagem enviada: {user_message}")
+        # logger.info(f"Mensagem recebida: {response.text}")
+        # logger.info(f"Tempo de resposta do modelo: {elapsed_time:.2f} segundos")
 
         await update.message.reply_text(
             response.text,
@@ -119,11 +130,6 @@ async def chat(update, context):
 
         await update.message.reply_text(
             f"Tempo de resposta do modelo: {elapsed_time:.2f} segundos",
-        )
-
-    except ResourceExhausted as e:
-        await update.message.reply_text(
-            f"Limite de quota alcançado : {e}",
         )
 
     except Exception as e:
@@ -140,69 +146,9 @@ async def chat(update, context):
     return CHAT
 
 
-async def request_image(update, context):
-    await update.message.reply_text(
-        "Processamento de imagem \n Mande uma imagem com descrição (ou não) para eu processar"
-    )
-    return PROCESSING_IMAGE
-
-
-async def process_image(update, context):
-    try:
-        user_images = update.message.photo
-        image_description = update.message.caption
-        logger.info(f"Imagens do usuário: {str(user_images)}")
-
-        if not user_images:
-            return REQUEST_IMAGE
-
-        logger.info("Processando imagem")
-        chat_session = get_or_create_chat_session(update.message.from_user.id)
-        file = await update.message.photo[0].get_file()
-        file_bytes = await file.download_as_bytearray()
-        image_file = Image.open(io.BytesIO(file_bytes))
-
-        await update.message.reply_text(
-            "Processando imagem...",
-            parse_mode=ParseMode.HTML,
-        )
-
-        # Pegar o input do user ou mandar só a imagem
-        response = await chat_session.send_message_async(
-            [
-                image_file,
-                MODEL_PROMPT + (image_description if image_description else "Gere uma descrição para essa imagem:"),
-            ]
-        )
-
-        await update.message.reply_text(
-            (
-                "Enviando pergunta: " + f"<b>{image_description}</b>"
-                if image_description
-                else "Nenhuma descrição detectada"
-            ),
-            parse_mode=ParseMode.HTML,
-        )
-
-        await update.message.reply_text(
-            response.text,
-            parse_mode=ParseMode.MARKDOWN,
-        )
-
-        return CHAT
-
-    except Exception as e:
-        logger.error(f"Erro crítico ao processar imagem: {str(e)}")
-        await update.message.reply_text(
-            "Erro ao processar imagem, voltando ao chat",
-            parse_mode=ParseMode.MARKDOWN,
-        )
-        return CHAT
-
-
 async def exit(update, context):
     await update.message.reply_text(
-        "<b>Obrigado por utilizar o Gobot \n Para mais conversas digite /start</b>",
+        "<b>Obrigado por utilizar o FlufinhoBot \n Para mais informações sobre o monitoramente digite /start</b>",
         parse_mode=ParseMode.HTML,
     )
 
@@ -219,10 +165,11 @@ async def get_info(update, context):
         return CHAT
 
     data = (
-        "<b> Informações gerais sobre o Gobot </b>\n\n"
+        "<b> Informações gerais sobre o FlufinhoBot </b>\n\n"
         f"* Nome do modelo: {MODEL_NAME}\n\n"
         f"* Prompt de geração: {MODEL_PROMPT}\n\n"
         f"* Quantidade de mensagens enviadas: {get_user_message_count(chat_session.history)}"
+        f"* Quantidade de dados coletados pelos sensores: {data_source.get_data_count()}"
     )
 
     await update.message.reply_text(data, parse_mode=ParseMode.HTML)

@@ -5,7 +5,7 @@ import google.generativeai as generai
 from dotenv import load_dotenv
 from telegram.ext import Application, CommandHandler, ConversationHandler, MessageHandler, filters
 
-from bot_utils import CHAT, PROCESSING_IMAGE, chat, error_handler, exit, get_info, process_image, request_image, start
+from bot_utils import CHAT, chat, error_handler, exit, get_info, start
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -24,10 +24,8 @@ def main():
         states={
             CHAT: [
                 MessageHandler((filters.TEXT | filters.PHOTO) & ~filters.COMMAND, chat),
-                CommandHandler("image", request_image),
                 CommandHandler("get_info", get_info),
             ],
-            PROCESSING_IMAGE: [MessageHandler(filters.PHOTO, process_image)],
         },
         fallbacks=[CommandHandler("end", exit)],
     )

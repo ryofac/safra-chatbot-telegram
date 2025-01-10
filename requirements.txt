@@ -1,8 +1,7 @@
 Pillow # gerenciar imagens
 google-generativeai
 python-telegram-bot
-
-
+firebase-admin==6.6.0 
 # dot_env
 python-dotenv
 
