@@ -2,7 +2,6 @@ import asyncio
 import datetime
 import json
 import logging
-import time
 
 import google.generativeai as generai
 from google.api_core.exceptions import ResourceExhausted
@@ -10,11 +9,10 @@ from telegram.constants import ParseMode
 from telegram.ext import ConversationHandler
 
 import config
-from config import MODEL_NAME, MODEL_PROMPT
 from sensor_source import SensorData, SensorSource
 
 # Enum de estados
-CHAT, REQUEST_IMAGE, PROCESSING_IMAGE = range(3)
+CHAT = range(1)
 
 
 logger = logging.getLogger(__name__)
@@ -23,14 +21,23 @@ model = generai.GenerativeModel(config.MODEL_NAME)
 
 chat_sessions = {}
 
-data_source = SensorSource("./external/cred.json")
+data_source = SensorSource(config.CREDENTIALS_PATH)
 
 
 def format_external_data(sensor_data: SensorData):
     logging.info(f"DADO DE SENSOR: + {sensor_data}")
     json_sensor_source = sensor_data.__dict__
-    json_sensor_source["data_coleta"] = sensor_data.data_coleta.timestamp()
+    json_sensor_source["data_coleta"] = sensor_data.data_coleta.strftime("%Y-%m-%d %H:%M:%S")
     return json_sensor_source
+
+
+def get_formatted_external_data():
+    start_date = datetime.datetime.now()
+    end_date = start_date - datetime.timedelta(days=5000)
+    raw_data = data_source.get_data((end_date, start_date))
+    all_data = json.dumps([format_external_data(data) for data in raw_data])
+    logging.info(f"Dados provenientes dos sensores: {all_data}")
+    return all_data
 
 
 def get_user_message_count(history):
@@ -43,7 +50,7 @@ def get_user_message_count(history):
 
 async def start(update, context):
     await update.message.reply_text(
-        "Bem vindo ao FlufinhoBot! \n <b>O seu amigo de irrigação!</b>\n Para sair dessa conversa digite: /end",
+        f"Bem vindo ao {config.BOT_NAME}! \n <b>{config.BOT_DESC}</b>\n Para sair dessa conversa digite: /end",
         parse_mode=ParseMode.HTML,
     )
     return CHAT
@@ -60,7 +67,7 @@ async def send_message_with_retry(chat_session, prompt, retries=3):
             response = await asyncio.wait_for(chat_session.send_message_async(prompt), timeout=10)
             return response
         except asyncio.TimeoutError:
-            logger.warning(f"Tentativa {attempt + 1} de enviar mensagem excedeu o tempo limite. Reintentando...")
+            logger.warning(f"Tentativa {attempt + 1} de enviar mensagem excedeu o tempo limite. Retentando...")
         except Exception as e:
             logger.error(f"Erro ao enviar mensagem na tentativa {attempt + 1}: {e}", exc_info=True)
         except ResourceExhausted as err:
@@ -76,8 +83,7 @@ def get_or_create_chat_session(user_id):
     if chat_session is None:
         chat_session = model.start_chat(
             history=[
-                {"role": "model", "parts": MODEL_PROMPT},
-                {"role": "model", "parts": "Você vai receber dados de sensores a cada mensagem do usuário"},
+                {"role": "model", "parts": config.MODEL_PROMPT},
             ]
         )
         chat_sessions[user_id] = chat_session
@@ -97,39 +103,20 @@ async def chat(update, context):
             )
             return CHAT
 
-        await update.message.reply_text(
-            "<b>Gerando sua resposta...</b>",
-            parse_mode=ParseMode.HTML,
-        )
-        start_time = time.time()
+        # Dados formatados provindos da fonte externa
+        all_data = get_formatted_external_data()
 
-        start_date = datetime.datetime.now()
-        end_date = start_date - datetime.timedelta(days=5000)
-
-        raw_data = data_source.get_data((end_date, start_date))
-
-        all_data = json.dumps([format_external_data(data) for data in raw_data])
-
-        logging.info(all_data)
-
-        prompt = f"""\n Perfira respostas curtas, dados atuais dos sensores em json:\n
-        {all_data}\n
-        Aqui está a mensagem do usuário: {user_message}"""
+        prompt = f"""
+            Dados atuais dos sensores em json, utilizar somente caso necessário:\n
+            {all_data}\n
+            Aqui está a mensagem do usuário: {user_message}
+            """
 
         response = await send_message_with_retry(chat_session, prompt)
-        elapsed_time = time.time() - start_time
-
-        # logger.info(f"Mensagem enviada: {user_message}")
-        # logger.info(f"Mensagem recebida: {response.text}")
-        # logger.info(f"Tempo de resposta do modelo: {elapsed_time:.2f} segundos")
 
         await update.message.reply_text(
             response.text,
             parse_mode=ParseMode.MARKDOWN,
-        )
-
-        await update.message.reply_text(
-            f"Tempo de resposta do modelo: {elapsed_time:.2f} segundos",
         )
 
     except Exception as e:
@@ -148,7 +135,8 @@ async def chat(update, context):
 
 async def exit(update, context):
     await update.message.reply_text(
-        "<b>Obrigado por utilizar o FlufinhoBot \n Para mais informações sobre o monitoramente digite /start</b>",
+        f"""<b>Obrigado por utilizar o {config.BOT_NAME}
+        Inicie novamente digitando /start</b> !""",
         parse_mode=ParseMode.HTML,
     )
 
@@ -165,11 +153,11 @@ async def get_info(update, context):
         return CHAT
 
     data = (
-        "<b> Informações gerais sobre o FlufinhoBot </b>\n\n"
-        f"* Nome do modelo: {MODEL_NAME}\n\n"
-        f"* Prompt de geração: {MODEL_PROMPT}\n\n"
+        f"<b> Informações gerais sobre {config.BOT_NAME} </b>\n\n"
+        f"* Nome do modelo: {config.MODEL_NAME}\n\n"
+        f"* Prompt de geração: {config.MODEL_PROMPT}\n\n"
         f"* Quantidade de mensagens enviadas: {get_user_message_count(chat_session.history)}"
-        f"* Quantidade de dados coletados pelos sensores: {data_source.get_data_count()}"
+        f"* Quantidade de dados coletados pelos sensores: {int(data_source.get_data_count())}"
     )
 
     await update.message.reply_text(data, parse_mode=ParseMode.HTML)

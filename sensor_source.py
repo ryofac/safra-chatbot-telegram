@@ -42,7 +42,9 @@ class SensorSource(ExternalSourceService):
             yield self._format_data(document)
 
     def get_data_count(self):
-        return self.collection.count()
+        count_cursor = self.collection.count().get()
+        print("DADOS DO COUNT: ", count_cursor[0][0].value)
+        return count_cursor[0][0].value
 
 
 if __name__ == "__main__":
