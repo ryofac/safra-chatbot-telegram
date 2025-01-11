@@ -1,23 +1,23 @@
-# Gobot - O chatbot sobre godot
+# FlufinhoBot - O Chatbot para Agricultura Familiar
 
-**Gobot** é um chatbot simples, projetado para ensinar de forma didática e resolver dúvidas sobre a Godot Game Engine, que opera utilizando a API oficial do Telegram e os modelos de geração de linguagem **Google Gemini**.
+**FlufinhoBot** é um chatbot projetado para facilitar o consumo de dados de sistemas de agricultura familiar. Ele opera utilizando a API oficial do Telegram e é alimentado pelos modelos de geração de linguagem **Google Gemini**.
 
-Para saber mais sobre a API base do Telegram utilizada, acesse [este link](#).
+Com o **FlufinhoBot**, agricultores e gestores podem obter informações relevantes sobre produção, consumo, vendas e muito mais de maneira simples e interativa.
 
 ## Como Rodar?
 
-1. **Crie o Bot no Telegram**:  
+1. **Crie o Bot no Telegram**:
    - Utilize o [BotFather](https://core.telegram.org/bots#botfather) para criar um novo bot e obter o token de acesso.
-  
+
 2. **Configuração do Ambiente**:
-   - Copie o token do bot para o arquivo `.env`, seguindo o modelo do arquivo `dot-env-example`.
-  
+   - Renomeie o arquivo `dot-env-example` para `.env`.
+   - Configure as variáveis de ambiente no arquivo `.env` com os seguintes dados:
+     ```env
+     BOT_TOKEN=YOUR-BOT-TOKEN # Credenciais do bot
+     API_KEY_GEMINI=YOUR-API-KEY-GEMINI # Credenciais GEMINI
+     CREDENTIALS_PATH=YOUR-CREDENTIALS-PATH # Credenciais do Firebase (json)
+     ```
+
 3. **Inicie o Bot**:
    - Execute o arquivo `main.py` para iniciar a comunicação do bot com a API do Telegram.
 
-
-## TODO:
-- [x] Conseguir mandar imagens via bot para a API do Gemini
-- [X] Deploy do backend do bot
-- [ ] Bot restrito a membros de um canal específico do Telegram
-- [ ] Mais interações
