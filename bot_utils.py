@@ -14,14 +14,13 @@ from sensor_source import SensorData, SensorSource
 # Enum de estados
 CHAT = range(1)
 
-
 logger = logging.getLogger(__name__)
 
 model = generai.GenerativeModel(config.MODEL_NAME)
 
 chat_sessions = {}
 
-data_source = SensorSource(config.CREDENTIALS_PATH)
+data_source = SensorSource()
 
 
 def format_external_data(sensor_data: SensorData):
@@ -33,9 +32,16 @@ def format_external_data(sensor_data: SensorData):
 
 def get_formatted_external_data():
     start_date = datetime.datetime.now()
-    end_date = start_date - datetime.timedelta(days=5000)
+    end_date = start_date - datetime.timedelta(days=config.LAST_DATA_TIME_IN_DAYS)
     raw_data = data_source.get_data((end_date, start_date))
-    all_data = json.dumps([format_external_data(data) for data in raw_data])
+    sorted_data = sorted(
+        raw_data,
+        key=lambda x: x.data_coleta,
+        reverse=True
+    )
+    recent_data = sorted_data[:config.DATA_LIMIT]
+    formatted_data = [format_external_data(data) for data in recent_data]
+    all_data = json.dumps(formatted_data)
     logging.info(f"Dados provenientes dos sensores: {all_data}")
     return all_data
 
@@ -107,6 +113,7 @@ async def chat(update, context):
         all_data = get_formatted_external_data()
 
         prompt = f"""
+            Data e hora atuais: {datetime.datetime.now()} 
             Dados atuais dos sensores em json, utilizar somente caso necessário:\n
             {all_data}\n
             Aqui está a mensagem do usuário: {user_message}
@@ -129,6 +136,7 @@ async def chat(update, context):
             parse_mode=ParseMode.HTML,
         )
         logger.info(chat_sessions)
+        logger.info(response.text)
 
     return CHAT
 

@@ -1,7 +1,7 @@
 Pillow # gerenciar imagens
 google-generativeai
 python-telegram-bot
-firebase-admin==6.6.0 
+
 # dot_env
 python-dotenv
 
@@ -9,3 +9,7 @@ python-dotenv
 flake8
 black
 isort
+
+# External database acesss:
+SQLAlchemy==2.0.40
+psycopg2

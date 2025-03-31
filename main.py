@@ -20,7 +20,7 @@ def main():
     generai.configure(api_key=os.getenv("API_KEY_GEMINI"))
     app = Application.builder().token(os.getenv("BOT_TOKEN")).build()
     conversation_handler = ConversationHandler(
-        entry_points=[CommandHandler("start", start)],
+        entry_points=[MessageHandler((filters.TEXT | filters.PHOTO) & ~filters.COMMAND, chat)],
         states={
             CHAT: [
                 MessageHandler((filters.TEXT | filters.PHOTO) & ~filters.COMMAND, chat),

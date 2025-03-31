@@ -2,53 +2,49 @@ import datetime
 from dataclasses import dataclass
 from typing import Generator
 
-import firebase_admin
-from firebase_admin import firestore
-from firebase_admin.credentials import Certificate
+import config
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy import create_engine, select
 
-from external_source import ExternalSourceService
+from models import TemperatureReading, Base
 
 
 @dataclass
 class SensorData:
-    temperatura: float  # Celsius
-    umidade_ar: float  # %
-    umidade_solo: float  # %
+    temperature: float  # Celsius
+    moisture: float  # %
+    gas_level: float  # %
     data_coleta: datetime.datetime
 
 
-class SensorSource(ExternalSourceService):
-    def __init__(self, cert_filename: str, data_collection="DadosEmissor1"):
-        self.cert = Certificate(cert_filename)
-        self.app = firebase_admin.initialize_app(self.cert)
-        self.db = firestore.client()
-        self.collection = self.db.collection(data_collection)
+class SensorSource:
+    def __init__(self):
+        self.engine = create_engine(config.DATABASE_URL)
+        self.session = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
+        Base.metadata.create_all(self.engine)
 
-    def _format_data(self, raw_document: dict):
+    def _format_data(self, row: TemperatureReading) -> SensorData:
         return SensorData(
-            temperatura=raw_document.get("Temperatura"),
-            umidade_ar=raw_document.get("UmidadeAr"),
-            umidade_solo=raw_document.get("UmidadeSolo"),
-            data_coleta=datetime.datetime.fromtimestamp(raw_document.get("timestamp").timestamp()),
+            temperature=row.temperature,
+            moisture=row.moisture,
+            gas_level=row.gas_level,
+            data_coleta=row.timestamp,
         )
 
-    def get_data(self, date_range: tuple[datetime.datetime]) -> Generator[None, None, SensorData]:
+    def get_data(self, date_range: tuple[datetime.datetime, datetime.datetime]) -> Generator[SensorData, None, None]:
         start_date, end_date = date_range
+        
+        with self.session() as session:
+            query = select(TemperatureReading).where(
+                TemperatureReading.timestamp >= start_date,
+                TemperatureReading.timestamp <= end_date
+            )
+            result = session.execute(query).scalars()
 
-        query = self.collection.where("timestamp", ">=", start_date).where("timestamp", "<=", end_date)
-        all_documents = query.stream()
+            for row in result:
+                yield self._format_data(row)
 
-        for document in all_documents:
-            yield self._format_data(document)
-
-    def get_data_count(self):
-        count_cursor = self.collection.count().get()
-        print("DADOS DO COUNT: ", count_cursor[0][0].value)
-        return count_cursor[0][0].value
-
-
-if __name__ == "__main__":
-    now = datetime.datetime.now()
-    old = datetime.datetime.now() - datetime.timedelta(weeks=500)
-
-    ec = SensorSource("./external/cred.json")
+    def get_data_count(self) -> int:
+        with self.session() as session:
+            query = select(TemperatureReading).count()
+            return session.execute(query).scalar()
