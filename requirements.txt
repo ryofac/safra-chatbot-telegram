@@ -13,3 +13,4 @@ isort
 # External database acesss:
 SQLAlchemy==2.0.40
 psycopg2
+requests
